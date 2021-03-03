@@ -1,0 +1,11 @@
+[Unit]
+Description=Xitogent Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python2 /etc/xitogent/xitogent.py start -c /etc/xitogent/xitogent.conf
+ExecStop=/bin/kill -s TERM $MAINPID
+
+[Install]
+WantedBy=multi-user.target
