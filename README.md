@@ -10,7 +10,7 @@ Introduced in 2021 to make a revolution in the Server Monitoring industry for wh
 
 ## Monitoring for Free
 
-Monitor 5 Servers for free, no limited time, no credit cards, You just need to [register](https://app.xitoring.com/register)
+Monitor 5 Servers for free, no limited time, no credit cards, You just need to [register](https://xitoring.com/register)
  
 # What is Xitogent
 
@@ -61,12 +61,6 @@ There are 2 main Python dependencies that Xitogent needs to run, **requests** an
 
     pip install requests
     pip install psutil
-
-## Download and setup Xitogent
-
-Now you need to download `xitogent.py` file and place it somewhere that you think is suitable.
-
-    curl "https://app.xitoring.com/xitogent.py"
 
 ### Creating config file
 
@@ -132,10 +126,13 @@ After creating a service file you need to run the following command to take effe
 
 ### SysV 
 
-For older Linux distros like CentOS 6 there is no **systemd** so you have to stick with the old SysV service manager. using the command below you can download an example of a Xitogent service file for SysV systems:
-
-    curl "https://app.xitoring.com/initd/example.xitogent_service.bash"
+For older Linux distros like CentOS 6 there is no **systemd** so you have to stick with the old SysV service manager. you can use the example service file included in the project files called `xitogent.bash`.
     
   Make sure that you place the service file in the correct path which is:
 
     /etc/init.d/
+
+### Conclusion
+
+After all these steps depend on your OS your Server will be added to the Xitoring panel and you can monitor all of your resources and services easily, If you have further questions about anything you can always contact our support team through [Email](support@xitoring.com).
+
