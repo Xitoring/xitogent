@@ -4,13 +4,13 @@
 
 **[Xitoring](https://xitoring.com)**  is an innovative monitoring platform (SaaS) for servers. We bring data from your server using our agent Xitogent to make sure your server is doing fine and avoid any downtime, performance issues, and increasing your customer’s satisfaction.
 
-Our  [global probing nodes](http://xitoring.com/features/)  are always monitoring your servers and as soon as a hiccup is detected, we’ll notify the right contact. We’re continuously working to make our software better and providing incredible features in the future.
+Our  [global probing nodes](https://xitoring.com/features/)  are always monitoring your servers and as soon as a hiccup is detected, we’ll notify the right contact. We’re continuously working to make our software better and providing incredible features in the future.
 
 Introduced in 2021 to make a revolution in the Server Monitoring industry for whom those are tired of those traditional ways and looking forward to Automation
 
 ## Monitoring for Free
 
-Monitor 5 Servers for free, no limited time, no credit cards, You just need to [register](https://xitoring.com/register)
+Monitor 5 Servers for free, no limited time, no credit cards, You just need to [register](https://app.xitoring.com/register)
  
 # What is Xitogent
 
@@ -134,7 +134,7 @@ After creating a service file you need to run the following command to take effe
 
 For older Linux distros like CentOS 6 there is no **systemd** so you have to stick with the old SysV service manager. using the command below you can download an example of a Xitogent service file for SysV systems:
 
-    curl "https://app.xitoring.com/initd/examle.xitogent_service.bash"
+    curl "https://app.xitoring.com/initd/example.xitogent_service.bash"
     
   Make sure that you place the service file in the correct path which is:
 
