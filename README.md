@@ -77,11 +77,11 @@ But you can place the config file somewhere else and point Xitogent to it using 
 After setting up everything for Xitogent on your Server, now it's for Xitogent to set up your server for monitoring. for registering your server to the Xitoring App some of the arguments are necessary required:
 
 `register` This argument is used only for the first time and will register/add your server to your Xitoring panel.
-`--key` You can find your key from the Xitoring panel > Servers > Add Device modal.
+`--key` You can find your key from the Xitoring panel > Servers > Add Server modal.
 `--auto_update=false` Make sure to disable auto-update because **auto-update is not possible when you are using the non-binary version**.
 
 ### Find the Key
-In Xitoring App go to the Account page from the sidebar panel, In the right side of that page you can see the the API Access section there is a default API key generated for your account which is the one that is used in the default add device command in Servers page, you either can use that API key or you can create a new one and specify a expire date for it. using each one of those options is your choice.
+In Xitoring App go to the Account page from the sidebar panel, In the right side of that page you can see the the API Access section there is a default API key generated for your account which is the one that is used in the default add server command in Servers page, you either can use that API key or you can create a new one and specify a expire date for it. using each one of those options is your choice.
 
 Below is an example of a complete register command where 4 modules, auto triggers, auto discovery are enabled and auto update is disabled:
 
