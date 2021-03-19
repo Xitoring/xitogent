@@ -17,9 +17,9 @@ if sys.version_info[0] < 3: from urllib import urlretrieve
 if sys.version_info[0] >= 3: from urllib.request import urlretrieve
 
 CORE_URL = 'https://app.xitoring.com/'
-AGENT_URL = 'https://app.xitoring.com/xitogent'
+AGENT_URL = 'https://app.xitoring.com/xitogent/xitogent'
 CONFIG_FILE = '/etc/xitogent/xitogent.conf'
-VERSION = '0.9.4'
+VERSION = '0.9.6'
 LAST_UPDATE_ATTEMPT = ''
 
 
@@ -149,70 +149,43 @@ def generate_preferences_params():
     if value != '':
         preferences['notification'] = value
 
-    value = find_argument_value('--auto_discovery=')
+    preferences['auto_discovery'] = is_auto_option_included('discovery')
+    preferences['auto_trigger'] = is_auto_option_included('trigger')
+    preferences['auto_update'] = is_auto_option_included('update')
 
-    value = value.lower()
-
-    if value != '' and value in ['true', 'false']:
-        preferences['auto_discovery'] = value
-    else:
-        preferences['auto_discovery'] = 'false'
-
-    value = find_argument_value('--auto_trigger=')
-
-    value = value.lower()
-
-    if value != '' and value in ['true', 'false']:
-        preferences['auto_trigger'] = value
-    else:
-        preferences['auto_trigger'] = 'false'
-
-    value = find_argument_value('--auto_update=')
-
-    value = value.lower()
-
-    if value != '' and value in ['true', 'false']:
-        preferences['auto_update'] = value
-    else:
-        preferences['auto_update'] = 'false'
-
-    value = find_argument_value('--module_ping=')
-
-    value = value.lower()
-
-    if value != '' and value in ['true', 'false']:
-        preferences['module_ping'] = value
-    else:
-        preferences['module_ping'] = 'false'
-
-    value = find_argument_value('--module_http=')
-
-    value = value.lower()
-
-    if value != '' and value in ['true', 'false']:
-        preferences['module_http'] = value
-    else:
-        preferences['module_http'] = 'false'
-
-    value = find_argument_value('--module_dns=')
-
-    value = value.lower()
-
-    if value != '' and value in ['true', 'false']:
-        preferences['module_dns'] = value
-    else:
-        preferences['module_dns'] = 'false'
-
-    value = find_argument_value('--module_ftp=')
-
-    value = value.lower()
-
-    if value != '' and value in ['true', 'false']:
-        preferences['module_ftp'] = value
-    else:
-        preferences['module_ftp'] = 'false'
+    preferences['module_ping'] = is_module_included('ping')
+    preferences['module_http'] = is_module_included('http')
+    preferences['module_dns'] = is_module_included('dns')
+    preferences['module_ftp'] = is_module_included('ftp')
+    preferences['module_smtp'] = is_module_included('smtp')
+    preferences['module_imap'] = is_module_included('imap')
+    preferences['module_pop3'] = is_module_included('pop3')
 
     return preferences
+
+
+def is_auto_option_included(name):
+
+    value = find_argument_value('--auto_{}='.format(name))
+
+    value = value.lower()
+
+    if value != '' and value in ['true', 'false']:
+        return value
+
+    return 'false'
+
+
+def is_module_included(name):
+
+    value = find_argument_value('--module_{}='.format(name))
+
+    value = value.lower()
+
+    if value != '' and value in ['true', 'false']:
+        return value
+
+    return 'false'
 
 
 def find_argument_value(argument):
@@ -844,7 +817,7 @@ def show_commands():
     print('%-15s' '%-16s %s' % ('', '--key', 'Your unique account key for adding new server - found on your control panel '))
     print('%-15s' '%-16s %s' % ('', '--group', 'Server\'s group name as string'))
     print('%-15s' '%-16s %s' % ('', '--subgroup', 'Server\'s subgroup name as string'))
-    print('%-15s' '%-16s %s' % ('', '--notification', 'Defauly notification role name as string'))
+    print('%-15s' '%-16s %s' % ('', '--notification', 'default notification role name as string'))
     print('%-15s' '%-16s %s' % ('', '--auto_discovery', 'Always looking for any new detected service'))
     print('%-15s' '%-16s %s' % ('', '--auto_trigger', 'Create new trigger'))
     print('%-15s' '%-16s %s' % ('', '--auto_update', 'Enable auto update for Xitogent'))
@@ -852,6 +825,9 @@ def show_commands():
     print('%-15s' '%-16s %s' % ('', '--module_http', 'Create http module automatically'))
     print('%-15s' '%-16s %s' % ('', '--module_dns', 'Create dns module automatically'))
     print('%-15s' '%-16s %s' % ('', '--module_ftp', 'Create ftp module automatically'))
+    print('%-15s' '%-16s %s' % ('', '--module_smtp', 'Create smtp module automatically'))
+    print('%-15s' '%-16s %s' % ('', '--module_imap', 'Create imap module automatically'))
+    print('%-15s' '%-16s %s' % ('', '--module_pop3', 'Create pop3 module automatically'))
     print('%-15s' '%s' % ('start', 'Start Xitogent (sending data)'))
     print('%-15s' '%s' % ('uninstall', 'Uninstall Xitogent and remove device on your control panel'))
     print('%-15s' '%s' % ('update', 'force update Xitogent'))
@@ -873,6 +849,7 @@ def show_xitogent_version():
         global CORE_URL
         print('Xitogent v' + VERSION + ' (' + CORE_URL + ')' )
     sys.exit(0)
+
 
 last_bw = {'time': '', 'value': ''}
 last_disk_io = {'time': '', 'value': ''}
