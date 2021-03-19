@@ -10,7 +10,7 @@ Introduced in 2021 to make a revolution in the Server Monitoring industry for wh
 
 ## Monitoring for Free
 
-Monitor 5 Servers for free, no limited time, no credit cards, You just need to [register](https://xitoring.com/register)
+Monitor 5 Servers for free, no limited time, no credit cards, You just need to [register](https://app.xitoring.com/register)
  
 # What is Xitogent
 
