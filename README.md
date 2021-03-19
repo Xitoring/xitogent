@@ -134,5 +134,5 @@ For older Linux distros like CentOS 6 there is no **systemd** so you have to sti
 
 ### Conclusion
 
-After all these steps depend on your OS your Server will be added to the Xitoring panel and you can monitor all of your resources and services easily, If you have further questions about anything you can always contact our support team through [Email](support@xitoring.com).
+After all these steps depend on your OS your Server will be added to the Xitoring panel and you can monitor all of your resources and services easily, If you have further questions about anything you can always contact our support team through [Email](mailto:support@xitoring.com).
 
