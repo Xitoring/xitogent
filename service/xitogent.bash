@@ -3,7 +3,7 @@
 # Description:       <Xitogent>
 # chkconfig: 2345 20 80
 
-SCRIPT="/usr/bin/xitogent start -c /etc/xitogent/xitogent.conf"
+SCRIPT="/usr/bin/python2 /usr/bin/xitogent start -c /etc/xitogent/xitogent.conf"
 RUNAS=root
 
 PIDFILE=/var/run/xitogent.pid
