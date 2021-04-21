@@ -19,8 +19,9 @@ if sys.version_info[0] >= 3: from urllib.request import urlretrieve
 CORE_URL = 'https://app.xitoring.com/'
 AGENT_URL = 'https://app.xitoring.com/xitogent/xitogent'
 CONFIG_FILE = '/etc/xitogent/xitogent.conf'
-VERSION = '0.9.6'
+VERSION = '0.9.7'
 LAST_UPDATE_ATTEMPT = ''
+SENDING_DATA_SECONDS = 60
 
 
 def modify_config_file(data):
@@ -124,7 +125,7 @@ def add_device():
 
 
 def is_dev():
-    data = read_config_file()
+    data = read_config_file(checking_version=True)
     if 'dev' in data and int(data['dev']) == 1:
         return True
     return False
@@ -197,17 +198,22 @@ def find_argument_value(argument):
     return ''
 
 
-def read_config_file():
+def read_config_file(checking_version=False):
 
     config_path = get_config_path()
 
     if not os.path.isfile(config_path):
-        sys.exit('Config file not found at the default path')
-
+        if checking_version:
+            return {}
+        else:
+            sys.exit('Config file not found at the default path')
     try:
         f = open(config_path, 'r')
     except IOError:
-        sys.exit('The config file is unreadable')
+        if checking_version:
+            return {}
+        else:
+            sys.exit('Config file not found at the default path')
 
     data = {}
 
@@ -324,8 +330,6 @@ def auto_update():
 
 def download_new_xitogent():
     try:
-
-        ssl._create_default_https_context = ssl._create_unverified_context
 
         if os.path.exists('/etc/xitogent/test'):
             os.system('rm -rf /etc/xitogent/test/*')
@@ -480,16 +484,21 @@ def start():
     config_data = read_config()
     while True:
         send_data(config_data)
-        time.sleep(60)
+        time.sleep(SENDING_DATA_SECONDS)
 
 
 def send_data(config_data):
+
+    global SENDING_DATA_SECONDS
 
     if config_data['node_url'] == '':
         print('\nFinding the nearest node to your server...\n')
         node_url = retrieve_node_url(config_data['uid'], config_data['password'])
         config_data['node_url'] = add_http_to_url(node_url)
+        SENDING_DATA_SECONDS = 5
         return None
+    else:
+        SENDING_DATA_SECONDS = 60
 
     url = config_data['node_url'] + "devices/" + config_data['uid'] + "/statistics/add"
 
