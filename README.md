@@ -45,22 +45,23 @@ Xitogent can be installed using our Installer Script, it will automatically down
 ## Installing Python
 
 As we said before, Xitogent is a Python-Based tool so if you want to use the non-binary version you need to have Python installed first.
-Xitogent is based on Python 2.7 so it's a better choice to install but Python 3.6 and 3.8 are supported if you have them already installed.
+As of version 1.0.0, Xitogent will require python 3.6 and higher.
 
 ### On CentOS 7 and later
 
-    yum install python2 python2-pip
+    yum install python3 python3-pip
 
 ### On Ubuntu 20.04
 
-    apt install python2 python2-pip
+    apt install python3 python3-pip
 
 ## Install Python libraries
 
-There are 2 main Python dependencies that Xitogent needs to run, **requests** and **psutil**. you can easily install them using **pip**.
+There are 3 main Python dependencies that Xitogent needs to run, **requests**, **psutil**, and **localStoragePy**. you can easily install them using **pip**.
 
     pip install requests
     pip install psutil
+    pip install localStoragePy
 
 ### Creating config file
 
@@ -69,7 +70,7 @@ By default, Xitogent uses `/etc/xitogent/xitogent.conf` as the config file so yo
     mkdir /etc/xitogent
     touch /etc/xitogent/xitogent.conf
 
-But you can place the config file somewhere else and point Xitogent to it using `-c` flag for more information check Xitogent help list.
+But you can place the config file somewhere else and point Xitogent to it using `-c` flag for more information check the Xitogent help list.
 
     python xitogent.py -c /path/to/config start
 
@@ -81,7 +82,7 @@ After setting up everything for Xitogent on your Server, now it's for Xitogent t
 `--auto_update=false` Make sure to disable auto-update because **auto-update is not possible when you are using the non-binary version**.
 
 ### Find the Key
-In Xitoring App go to the Account page from the sidebar panel, In the right side of that page you can see the the API Access section there is a default API key generated for your account which is the one that is used in the default add server command in Servers page, you either can use that API key or you can create a new one and specify a expire date for it. using each one of those options is your choice.
+In Xitoring App go to the Account page from the sidebar panel, On the right side of that page you can see the API Access section there is a default API key generated for your account which is the one that is used in the default add server command in Servers page, you either can use that API key or you can create a new one and specify a expire date for it. using each one of those options is your choice.
 
 Below is an example of a complete register command where 4 modules, auto triggers, auto discovery are enabled and auto update is disabled:
 
@@ -95,9 +96,37 @@ After registering your Server to your panel, you need to start the Xitogent proc
 
     python xitogent.py start
 
+## Stop Xitogent
+
+You can easily stop the Xitogent process using:
+
+    python xitogent.py stop
+
+## Xitogent Pause/Unpause
+
+Using the `python xitogent.py pause` argument will stop Xitogent from collecting and sending data for monitoring, you can use it for multiple purposes like maintenance, network configuration changes, etc. the most important feature of Xitogent pause is that you can determine how much time you need it to stay pause and after that xitogent will automatically start collecting and sending data. for example:
+
+the following example will pause Xitogent for 2 hours.
+
+    python xitogent.py pause 2h
+
+Obviously, you can unpause Xitogent with:
+
+    python xitogent.py unpause
+
+## Xitogent Status
+
+You can get a brief report of Xitogent with `python xitogent.py status` command it will output a report like below:
+
+    Status                        running
+    Uptime                        07:45:36
+    Sent sequences                4689
+    Failed sequences              0
+
+
 ## Creating Service for Xitogent
 
-You can manage the Xitogent process with service managers like **systemd** and **SysV**, you need to create a service file based on the service manager that your OS uses.
+You can manage the Xitogent process with service managers like **systemd** and **SysV** or just run it as a daemon background process, you need to create a service file based on the service manager that your OS uses.
 
 ### systemd Service
 The default path for systemd services is:
@@ -132,7 +161,12 @@ For older Linux distros like CentOS 6 there is no **systemd** so you have to sti
 
     /etc/init.d/
 
+### No service manager
+
+If your OS doesn't have a service manager or you don't want to use it forever reason, you can run Xitogent with the `-d` flag to run in in background:
+
+    python xitogent.py start -d
+
 ### Conclusion
 
-After all these steps depend on your OS your Server will be added to the Xitoring panel and you can monitor all of your resources and services easily, If you have further questions about anything you can always contact our support team through [Email](mailto:support@xitoring.com).
-
+After all these steps depend on your OS your Server will be added to the Xitoring panel and you can monitor all of your resources and services easily If you have further questions about anything you can always contact our support team through [Email](mailto:support@xitoring.com).

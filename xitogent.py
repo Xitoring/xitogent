@@ -1,4 +1,5 @@
 import time
+import tempfile
 import sys
 import subprocess
 import ssl
@@ -6,22 +7,43 @@ import shutil
 import requests
 import re
 import psutil
+import pkgutil
 import os.path
 import os
 import math
 import json
 import datetime
 import collections
+import atexit
 if sys.version_info[0] >= 3: from urllib.request import urlretrieve
 if sys.version_info[0] < 3: from urllib import urlretrieve
 from requests import ReadTimeout, ConnectTimeout, HTTPError, Timeout, ConnectionError, TooManyRedirects
+from localStoragePy import localStoragePy
+
+#add cert data for the requests package
+
+cert_data = pkgutil.get_data('certifi', 'cacert.pem')
+
+handle = tempfile.NamedTemporaryFile(delete=False)
+handle.write(cert_data)
+handle.flush()
+
+os.environ['REQUESTS_CA_BUNDLE'] = handle.name
+
+#######################################
 
 CORE_URL = 'https://app.xitoring.com/'
 AGENT_URL = 'https://app.xitoring.com/xitogent/xitogent'
+
 CONFIG_FILE = '/etc/xitogent/xitogent.conf'
-VERSION = '0.9.9'
+PID_FILE = '/var/run/xitogent.pid'
+
+#variables are used for auto updating
+VERSION = '1.0.0'
 LAST_UPDATE_ATTEMPT = ''
 SENDING_DATA_SECONDS = 60
+
+localStorage = localStoragePy("xitogent", 'text')
 
 
 def modify_config_file(data, delete_mode=False):
@@ -484,13 +506,143 @@ def is_start_mode():
 
 
 def start():
+
+    if is_running():
+        sys.exit('Already running')
+
+    reset_variables()
+
+    if is_start_as_daemon():
+        daemonize()
+    else:
+        save_pid()
+
     config_data = read_config()
+
+    localStorage.setItem('uptime', int(time.time()))
+
     while True:
         if not is_device_paused():
             send_data(config_data)
         else:
             print('Xitogent is paused')
+            inquire_pause_status()
         time.sleep(SENDING_DATA_SECONDS)
+
+
+def increment_variable(name):
+
+    old_value = localStorage.getItem(name)
+
+    if old_value:
+        localStorage.setItem(name, int(old_value) + 1)
+    else:
+        localStorage.setItem(name, 1)
+
+
+def is_process_running(pid):
+
+    for proc in psutil.process_iter():
+
+        try:
+            if proc.pid == int(pid):
+                return True
+        except psutil.NoSuchProcess:
+            pass
+
+    return False
+
+
+def save_pid():
+    pid = str(os.getpid())
+    file = open(PID_FILE, 'w+')
+    file.write("%s\n" % pid)
+    file.close()
+
+
+def is_running():
+    if os.path.isfile(PID_FILE):
+        try:
+            with open(PID_FILE) as file:
+                pid = file.read().strip()
+                if is_process_running(pid):
+                    return True
+        except Exception as e:
+            pass
+
+    return False
+
+
+def is_start_as_daemon():
+    if '-d' in sys.argv:
+        return True
+    return False
+
+
+def check_start_as_daemon():
+
+    if '-d' not in sys.argv:
+        return None
+
+    daemonize()
+
+
+def daemonize():
+
+    try:
+        pid = os.fork()
+        if pid > 0:
+            sys.exit(0)
+    except OSError:
+        sys.exit("fork #1 failed")
+
+    # decouple from parent environment
+    os.chdir("/")
+    os.setsid()
+    os.umask(0)
+
+    # do second fork
+    try:
+        pid = os.fork()
+        if pid > 0:
+            sys.exit(0)
+    except OSError:
+        sys.exit("fork #2 failed")
+
+    # redirect standard file descriptors
+    sys.stdout.flush()
+    sys.stderr.flush()
+
+    si = open(os.devnull, 'r')
+    so = open(os.devnull, 'a+')
+
+    try:
+        se = open(os.devnull, 'a+', 0)
+    except ValueError:
+        # Python 3 can't have unbuffered text I/O
+        se = open(os.devnull, 'a+', 1)
+
+    try:
+        os.dup2(si.fileno(), sys.stdin.fileno())
+        os.dup2(so.fileno(), sys.stdout.fileno())
+        os.dup2(se.fileno(), sys.stderr.fileno())
+    except Exception:
+        pass
+
+    # write pidfile
+    try:
+        atexit.register(del_pid_file)
+        pid = str(os.getpid())
+        file = open(PID_FILE, 'w+')
+        file.write("%s\n" % pid)
+        file.close()
+    except Exception:
+        pass
+
+
+def del_pid_file():
+    if os.path.isfile(PID_FILE):
+        os.remove(PID_FILE)
 
 
 def is_device_paused():
@@ -500,10 +652,35 @@ def is_device_paused():
     if 'pause_until' not in config_data:
         return False
 
-    if int(config_data['pause_until']) >= time.time():
+    if config_data['pause_until'] != '' and int(config_data['pause_until']) >= time.time():
         return True
 
     return False
+
+
+def inquire_pause_status():
+    try:
+
+        config_data = read_config()
+
+        global CORE_URL
+
+        if is_dev():
+            CORE_URL = 'http://localhost/'
+
+        headers = {'Accept': 'application/json', 'uid': config_data['uid'], 'password': config_data['password']}
+
+        response = requests.get("{core_url}devices/{uid}/check-pause".format(core_url=CORE_URL, uid=config_data['uid']), headers=headers)
+
+        response.raise_for_status()
+
+        response = json.loads(response.text)
+
+        if not response['is_paused']:
+            modify_config_file({'pause_until': ''}, delete_mode=True)
+
+    except (ConnectTimeout, HTTPError, ReadTimeout, Timeout, ConnectionError, TooManyRedirects) as e:
+        pass
 
 
 def send_data(config_data):
@@ -545,6 +722,8 @@ def send_data(config_data):
             if needs_update and can_be_updated():
                 auto_update()
 
+            increment_variable('sent_sequences')
+
             return None
 
         message = now.strftime("%Y-%m-%d %H:%M:%S") + ' - HTTP status:' + str(response.status_code) + ' - '
@@ -553,14 +732,22 @@ def send_data(config_data):
         if response.status_code == 400:
             errors = []
             result = json.loads(response.text)
+            if 'pause_until' in result:
+                modify_config_file({'pause_until': str(result['pause_until'])})
+                del result['pause_until']
             for i in result:
-                errors.append(result[i][0])
-            print(message + ", ".join(errors))
+                if isinstance(result[i], list):
+                    errors.append(result[i][0])
+                else:
+                    errors.append(result[i])
+            print("\n" + message + ", ".join(errors))
+            increment_variable('failed_sequences')
             return None
 
         #Unauthorized
         if response.status_code == 401:
             print('\n' + message + 'Unauthorized action caused by Invalid Password or UID' + '\n')
+            increment_variable('failed_sequences')
             return None
 
         #url not found or uid is invalid
@@ -570,31 +757,40 @@ def send_data(config_data):
                 print('\n' + message + str(result['message']) + '\n')
             except Exception:
                 print('\n' + message + 'URL not found' + '\n')
-
+            increment_variable('failed_sequences')
             return None
 
         #error
         print(message + str(response.text))
 
+        increment_variable('failed_sequences')
+
     except HTTPError:
         print('\nHTTP Exception for ' + url + '\n')
+        increment_variable('failed_sequences')
     except ConnectTimeout:
         print('\nTimed out while connecting to the host\n')
+        increment_variable('failed_sequences')
     except ReadTimeout:
         print('\nTimed out while receiving data from the host\n')
+        increment_variable('failed_sequences')
     except Timeout:
         print('\nTimed out while requesting to the host\n')
+        increment_variable('failed_sequences')
     except ConnectionError:
         print('\nFailed to establish a connection\n')
         node_url = retrieve_node_url(config_data['uid'], config_data['password'])
         if node_url:
             config_data['node_url'] = add_http_to_url(node_url)
+        increment_variable('failed_sequences')
     except TooManyRedirects:
         print('\nToo many redirects\n')
+        increment_variable('failed_sequences')
     except (requests.exceptions.InvalidURL, requests.exceptions.MissingSchema):
         print('\nURL is improperly formed or cannot be parsed\n')
         node_url = retrieve_node_url(config_data['uid'], config_data['password'])
         config_data['node_url'] = add_http_to_url(node_url)
+        increment_variable('failed_sequences')
 
 
 def can_be_updated():
@@ -834,6 +1030,9 @@ def is_show_commands_mode():
             and not is_new_xitogent_test()
             and not is_pause_mode()
             and not is_unpause_mode()
+            and not is_status_mode()
+            and not is_stop_mode()
+            and not is_restart_mode()
     ):
         return True
     return False
@@ -859,6 +1058,10 @@ def show_commands():
     print('%-15s' '%-16s %s' % ('', '--module_imap', 'Create imap module automatically'))
     print('%-15s' '%-16s %s' % ('', '--module_pop3', 'Create pop3 module automatically'))
     print('%-15s' '%s' % ('start', 'Start Xitogent (sending data)'))
+    print('%-15s' '%s' % ('', 'options:'))
+    print('%-15s' '%-16s %s' % ('', '-d', 'Start as daemon'))
+    print('%-15s' '%s' % ('stop', 'Stop Xitogent'))
+    print('%-15s' '%s' % ('restart', 'Restart Xitogent'))
     print('%-15s' '%s' % ('uninstall', 'Uninstall Xitogent and remove device on your control panel'))
     print('%-15s' '%s' % ('update', 'Force update Xitogent'))
     print('%-15s' '%s' % ('pause', 'Pause Xitogent'))
@@ -868,6 +1071,7 @@ def show_commands():
     print('%-15s' '%s' % ('unpause', 'Unpause Xitogent'))
     print('%-15s' '%s' % ('help', 'Show Xitogent\' s commands'))
     print('%-15s' '%s' % ('version', 'Show Xitogent\' s version'))
+    print('%-15s' '%s' % ('status', 'Show Xitogent\' s status'))
     sys.exit(0)
 
 
@@ -1002,6 +1206,106 @@ def unpause():
 
     except (ConnectTimeout, HTTPError, ReadTimeout, Timeout, ConnectionError, TooManyRedirects) as e:
         sys.exit('Cannot unpause Xitogent.')
+
+
+def is_stop_mode():
+    if len(sys.argv) > 1 and sys.argv[1] == 'stop':
+        return True
+    return False
+
+
+def stop():
+
+    if not is_running():
+        if is_stop_mode():
+            print('Already stopped.')
+        return None
+
+    if os.path.isfile(PID_FILE):
+        try:
+            with open(PID_FILE) as file:
+
+                pid = file.read().strip()
+
+                os.kill(int(pid), 15)
+
+                run_command('rm -rf {}'.format(PID_FILE))
+
+                if is_stop_mode():
+                    print('Xitogent stopped successfully.')
+
+        except Exception:
+            if is_stop_mode():
+                print('Stopping Xitogent failed.')
+    else:
+
+        if is_centos6():
+            cmd = 'service xitogent stop'
+        else:
+            cmd = 'systemctl stop xitogent'
+
+        if not run_command(cmd):
+            if is_stop_mode():
+                print('Stopping Xitogent service failed.')
+            return None
+
+        if is_stop_mode():
+            print('Xitogent stopped successfully.')
+
+
+def reset_variables():
+    localStorage.setItem('uptime', 0)
+    localStorage.setItem('sent_sequences', 0)
+    localStorage.setItem('failed_sequences', 0)
+
+
+def is_restart_mode():
+    if len(sys.argv) > 1 and sys.argv[1] == 'restart':
+        return True
+    return False
+
+
+def restart():
+    stop()
+    start()
+
+
+def is_status_mode():
+    if len(sys.argv) > 1 and sys.argv[1] == 'status':
+        return True
+    return False
+
+
+def show_xitogent_status():
+
+    uptime = localStorage.getItem('uptime')
+
+    if is_running() and uptime:
+        uptime = time.strftime("%H:%M:%S", time.gmtime(int(time.time()) - int(uptime)))
+    else:
+        uptime = 0
+
+    if is_device_paused():
+        status = 'paused'
+    elif is_running():
+        status = 'running'
+    else:
+        status = 'stopped'
+
+    sent_sequences = localStorage.getItem('sent_sequences')
+
+    if not is_running() or not sent_sequences:
+        sent_sequences = 0
+
+    failed_sequences = localStorage.getItem('failed_sequences')
+
+    if not is_running() or not failed_sequences:
+        failed_sequences = 0
+
+    print('%-30s' '%s' % ('Status', status))
+    print('%-30s' '%s' % ('Uptime', uptime))
+    print('%-30s' '%s' % ('Sent sequences', sent_sequences))
+    print('%-30s' '%s' % ('Failed sequences', failed_sequences))
 
 last_bw = {'time': '', 'value': ''}
 last_disk_io = {'time': '', 'value': ''}
@@ -1486,8 +1790,7 @@ class Linux:
 
             rawdict = {}
 
-            Interface = collections.namedtuple('snetio', ['bytes_sent', 'bytes_recv',debug2: channel 0: window 997700 sent adjust 50876
-
+            Interface = collections.namedtuple('snetio', ['bytes_sent', 'bytes_recv',
                                                           'packets_sent', 'packets_recv',
                                                           'errin', 'errout',
                                                           'dropin', 'dropout'])
@@ -1709,3 +2012,12 @@ if is_pause_mode():
 
 if is_unpause_mode():
     unpause()
+
+if is_status_mode():
+    show_xitogent_status()
+
+if is_stop_mode():
+    stop()
+
+if is_restart_mode():
+    restart()
