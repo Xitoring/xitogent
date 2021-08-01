@@ -1,25 +1,25 @@
-import collections
-import datetime
-import json
-import math
-import os
-import os.path
-import psutil
-import re
-import requests
-import shutil
-import ssl
-import subprocess
-import sys
 import time
-from requests import ReadTimeout, ConnectTimeout, HTTPError, Timeout, ConnectionError, TooManyRedirects
-if sys.version_info[0] < 3: from urllib import urlretrieve
+import sys
+import subprocess
+import ssl
+import shutil
+import requests
+import re
+import psutil
+import os.path
+import os
+import math
+import json
+import datetime
+import collections
 if sys.version_info[0] >= 3: from urllib.request import urlretrieve
+if sys.version_info[0] < 3: from urllib import urlretrieve
+from requests import ReadTimeout, ConnectTimeout, HTTPError, Timeout, ConnectionError, TooManyRedirects
 
 CORE_URL = 'https://app.xitoring.com/'
 AGENT_URL = 'https://app.xitoring.com/xitogent/xitogent'
 CONFIG_FILE = '/etc/xitogent/xitogent.conf'
-VERSION = '0.9.7'
+VERSION = '0.9.8'
 LAST_UPDATE_ATTEMPT = ''
 SENDING_DATA_SECONDS = 60
 
@@ -665,6 +665,9 @@ def delete_xitogent():
         service_path = '/etc/systemd/system/xitogent.service'
         stop_xitogent_cmd = 'systemctl stop xitogent'
 
+    if not run_command(stop_xitogent_cmd):
+        sys.exit('Failed to stop service')
+
     if not run_command('rm -rf ' + service_path):
         sys.exit('Failed to delete ' + service_path + ' file')
 
@@ -673,9 +676,6 @@ def delete_xitogent():
 
     if not run_command('rm -rf /usr/bin/xitogent'):
         sys.exit('Failed to delete /usr/bin/xitogent directory')
-
-    if not run_command(stop_xitogent_cmd):
-        sys.exit('Failed to stop service')
 
     print('Xitogent uninstalled successfully')
 
@@ -886,7 +886,7 @@ class Linux:
 
         # error
         if p.returncode != 0:
-            if functions.is_initial_test():
+            if is_initial_test():
                 return {'status': 'failed', 'message': stderr}
             return ''
 
@@ -910,7 +910,7 @@ class Linux:
                         return line.replace("\n", "")
 
         except Exception as e:
-            if functions.is_initial_test():
+            if is_initial_test():
                 return {'status': 'failed', 'message': e}
             pass
 
@@ -925,7 +925,7 @@ class Linux:
 
         # error
         if p.returncode != 0:
-            if functions.is_initial_test():
+            if is_initial_test():
                 return {'status': 'failed', 'message': stderr}
             return ''
 
@@ -941,7 +941,7 @@ class Linux:
                     if line.strip() and line.rstrip('\n').startswith('model name'):
                         return line.rstrip('\n').split(':')[1]
         except Exception as e:
-            if functions.is_initial_test():
+            if is_initial_test():
                 return {'status': 'failed', 'message': e}
             pass
 
@@ -956,7 +956,7 @@ class Linux:
 
         # error
         if p.returncode != 0:
-            if functions.is_initial_test():
+            if is_initial_test():
                 return {'status': 'failed', 'message': stderr}
             return 0
 
@@ -978,7 +978,7 @@ class Linux:
             return cls.convert_uptime_to_human_readable(psutil.boot_time())
 
         except Exception as e:
-            if functions.is_initial_test():
+            if is_initial_test():
                 return {'status': 'failed', 'message': e}
             return ''
 
@@ -1024,7 +1024,7 @@ class Linux:
 
         # error
         if p.returncode != 0:
-            if functions.is_initial_test():
+            if is_initial_test():
                 return {'status': 'failed', 'message': stderr}
             return []
 
@@ -1057,7 +1057,7 @@ class Linux:
 
             return result
         except Exception as e:
-            if functions.is_initial_test():
+            if is_initial_test():
                 return {'status': 'failed', 'message': e}
             pass
 
@@ -1069,7 +1069,7 @@ class Linux:
             load_1_minute, load_5_minutes, load_15_minutes = map("{0:.2f}".format, os.getloadavg())
             return {'1min': float(load_1_minute), '5min': float(load_5_minutes), '15min': float(load_15_minutes)}
         except Exception as e:
-            if functions.is_initial_test():
+            if is_initial_test():
                 return {'status': 'failed', 'message': e}
             pass
 
@@ -1088,7 +1088,7 @@ class Linux:
 
             return disks
         except Exception as e:
-            if functions.is_initial_test():
+            if is_initial_test():
                 return {'status': 'failed', 'message': e}
             pass
 
@@ -1115,7 +1115,7 @@ class Linux:
             return changed_disk_io
 
         except Exception as e:
-            if functions.is_initial_test():
+            if is_initial_test():
                 return {'status': 'failed', 'message': e}
             pass
 
@@ -1221,7 +1221,7 @@ class Linux:
                 'buffers': memory_stats.buffers,
             }
         except Exception as e:
-            if functions.is_initial_test():
+            if is_initial_test():
                 return {'status': 'failed', 'message': e}
             pass
 
@@ -1248,7 +1248,7 @@ class Linux:
             return changed_bw
 
         except Exception as e:
-            if functions.is_initial_test():
+            if is_initial_test():
                 return {'status': 'failed', 'message': e}
             pass
 
@@ -1353,7 +1353,7 @@ class Linux:
 
             return rawdict
         except Exception as e:
-            if functions.is_initial_test():
+            if is_initial_test():
                 return {'status': 'failed', 'message': e}
             pass
 
@@ -1417,7 +1417,7 @@ class Linux:
 
             return detected_softwares
         except Exception as e:
-            if functions.is_initial_test():
+            if is_initial_test():
                 return {'status': 'failed', 'message': e}
             pass
 
@@ -1463,7 +1463,7 @@ class Linux:
 
             return processes
         except Exception as e:
-            if functions.is_initial_test():
+            if is_initial_test():
                 return {'status': 'failed', 'message': e}
             pass
 
@@ -1509,7 +1509,7 @@ class Linux:
 
             return processes
         except Exception as e:
-            if functions.is_initial_test():
+            if is_initial_test():
                 return {'status': 'failed', 'message': e}
             pass
 
