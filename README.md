@@ -169,4 +169,4 @@ If your OS doesn't have a service manager or you don't want to use it forever re
 
 ### Conclusion
 
-After all these steps depend on your OS your Server will be added to the Xitoring panel and you can monitor all of your resources and services easily If you have further questions about anything you can always contact our support team through [Email](mailto:support@xitoring.com).
+After all these steps depend on your OS your Server will be added to the Xitoring panel and you can monitor all of your resources and services easily If you have further questions about anything you can always contact our support team through support [at] xitoring .com or read more on [Document](https://xitoring.com/docs/).
