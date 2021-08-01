@@ -19,17 +19,20 @@ from requests import ReadTimeout, ConnectTimeout, HTTPError, Timeout, Connection
 CORE_URL = 'https://app.xitoring.com/'
 AGENT_URL = 'https://app.xitoring.com/xitogent/xitogent'
 CONFIG_FILE = '/etc/xitogent/xitogent.conf'
-VERSION = '0.9.8'
+VERSION = '0.9.9'
 LAST_UPDATE_ATTEMPT = ''
 SENDING_DATA_SECONDS = 60
 
 
-def modify_config_file(data):
+def modify_config_file(data, delete_mode=False):
 
     config = read_config_file()
 
     for i in data:
-        config[i] = data[i]
+        if delete_mode and i in config:
+            del config[i]
+        else:
+            config[i] = data[i]
 
     config_path = get_config_path()
 
@@ -483,8 +486,24 @@ def is_start_mode():
 def start():
     config_data = read_config()
     while True:
-        send_data(config_data)
+        if not is_device_paused():
+            send_data(config_data)
+        else:
+            print('Xitogent is paused')
         time.sleep(SENDING_DATA_SECONDS)
+
+
+def is_device_paused():
+
+    config_data = read_config()
+
+    if 'pause_until' not in config_data:
+        return False
+
+    if int(config_data['pause_until']) >= time.time():
+        return True
+
+    return False
 
 
 def send_data(config_data):
@@ -813,6 +832,8 @@ def is_show_commands_mode():
             and not is_version_mode()
             and not is_initial_test()
             and not is_new_xitogent_test()
+            and not is_pause_mode()
+            and not is_unpause_mode()
     ):
         return True
     return False
@@ -839,7 +860,12 @@ def show_commands():
     print('%-15s' '%-16s %s' % ('', '--module_pop3', 'Create pop3 module automatically'))
     print('%-15s' '%s' % ('start', 'Start Xitogent (sending data)'))
     print('%-15s' '%s' % ('uninstall', 'Uninstall Xitogent and remove device on your control panel'))
-    print('%-15s' '%s' % ('update', 'force update Xitogent'))
+    print('%-15s' '%s' % ('update', 'Force update Xitogent'))
+    print('%-15s' '%s' % ('pause', 'Pause Xitogent'))
+    print('%-15s' '%s' % ('', 'options:'))
+    print('%-15s' '%s' % ('', 'm (minute) _ h (hour) _ d (day) _ w (week)'))
+    print('%-15s' '%s' % ('', 'Usage: Xitogent pause 3d'))
+    print('%-15s' '%s' % ('unpause', 'Unpause Xitogent'))
     print('%-15s' '%s' % ('help', 'Show Xitogent\' s commands'))
     print('%-15s' '%s' % ('version', 'Show Xitogent\' s version'))
     sys.exit(0)
@@ -859,6 +885,123 @@ def show_xitogent_version():
         print('Xitogent v' + VERSION + ' (' + CORE_URL + ')' )
     sys.exit(0)
 
+
+def is_pause_mode():
+    if len(sys.argv) > 1 and sys.argv[1] == 'pause':
+        return True
+    return False
+
+
+def pause():
+
+    try:
+
+        pause_until = fetch_pause_until()
+
+        config_data = read_config()
+
+        global CORE_URL
+
+        if is_dev():
+            CORE_URL = 'http://localhost/'
+
+        headers = {'Accept': 'application/json', 'uid': config_data['uid'], 'password': config_data['password']}
+
+        response = requests.get("{core_url}devices/{uid}/pause".format(core_url=CORE_URL, uid=config_data['uid']), params={'pause_until': pause_until}, headers=headers)
+
+        response.raise_for_status()
+
+        modify_config_file({'pause_until': str(pause_until)})
+
+        print('Xitogent paused succeefully.')
+
+    except (ConnectTimeout, HTTPError, ReadTimeout, Timeout, ConnectionError, TooManyRedirects) as e:
+        sys.exit('Cannot pause Xitogent.')
+
+
+def fetch_pause_until():
+
+    time_string = ''
+
+    MINUTE_IN_SECONDS = 60
+    HOUR_IN_SECONDS = 60 * MINUTE_IN_SECONDS
+    DAY_IN_SECONDS = 24 * HOUR_IN_SECONDS
+    WEEK_IN_SECONDS = 7 * DAY_IN_SECONDS
+    YEAR_IN_SECONDS = 365 * DAY_IN_SECONDS
+
+    for index, value in enumerate(sys.argv):
+        next_index = index+1
+        if re.search("pause", value) and next_index < len(sys.argv):
+            time_string = sys.argv[next_index]
+
+    if time_string == '':
+        return int(time.time() + (16 * YEAR_IN_SECONDS))
+
+    RELATIVE_TIME_REGEX = re.compile('^((\d+)[wW])?((\d+)[dD])?((\d+)[hH])?((\d+)[mM])?$')
+
+    relative_time_found = RELATIVE_TIME_REGEX.match(time_string)
+
+    if not relative_time_found:
+        sys.exit('Time must be in the format 2w4d6h45m')
+
+    seconds = 0
+
+    time_string = time_string.strip()
+
+    durations = list(map(int, re.split('[wWdDhHmM]', time_string)[:-1]))
+
+    types = list(re.split('\d+', time_string))
+
+    if types[0] == '':
+        del types[0]
+
+    for index, duration in enumerate(durations):
+
+        type = types[index]
+
+        type = type.lower()
+
+        if type == 'w':
+            seconds += duration * WEEK_IN_SECONDS
+        elif type == 'd':
+            seconds += duration * DAY_IN_SECONDS
+        elif type == 'h':
+            seconds += duration * HOUR_IN_SECONDS
+        else:
+            seconds += duration * MINUTE_IN_SECONDS
+
+    return int(time.time() + seconds)
+
+
+def is_unpause_mode():
+    if len(sys.argv) > 1 and sys.argv[1] == 'unpause':
+        return True
+    return False
+
+
+def unpause():
+    try:
+
+        config_data = read_config()
+
+        global CORE_URL
+
+        if is_dev():
+            CORE_URL = 'http://localhost/'
+
+        headers = {'Accept': 'application/json', 'uid': config_data['uid'], 'password': config_data['password']}
+
+        response = requests.get("{core_url}devices/{uid}/unpause".format(core_url=CORE_URL, uid=config_data['uid']),
+                                headers=headers)
+
+        response.raise_for_status()
+
+        modify_config_file({'pause_until': ''}, delete_mode=True)
+
+        print('Xitogent unpaused successfully.')
+
+    except (ConnectTimeout, HTTPError, ReadTimeout, Timeout, ConnectionError, TooManyRedirects) as e:
+        sys.exit('Cannot unpause Xitogent.')
 
 last_bw = {'time': '', 'value': ''}
 last_disk_io = {'time': '', 'value': ''}
@@ -1343,7 +1486,8 @@ class Linux:
 
             rawdict = {}
 
-            Interface = collections.namedtuple('snetio', ['bytes_sent', 'bytes_recv',
+            Interface = collections.namedtuple('snetio', ['bytes_sent', 'bytes_recv',debug2: channel 0: window 997700 sent adjust 50876
+
                                                           'packets_sent', 'packets_recv',
                                                           'errin', 'errout',
                                                           'dropin', 'dropout'])
@@ -1560,3 +1704,8 @@ if is_new_xitogent_test():
 if is_uninstall():
     uninstall()
 
+if is_pause_mode():
+    pause()
+
+if is_unpause_mode():
+    unpause()
