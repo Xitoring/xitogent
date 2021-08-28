@@ -2,6 +2,7 @@ import time
 import tempfile
 import sys
 import subprocess
+import string
 import ssl
 import shutil
 import requests
@@ -12,6 +13,7 @@ import os.path
 import os
 import math
 import json
+import jc.parsers.netstat
 import datetime
 import collections
 import atexit
@@ -39,7 +41,7 @@ CONFIG_FILE = '/etc/xitogent/xitogent.conf'
 PID_FILE = '/var/run/xitogent.pid'
 
 #variables are used for auto updating
-VERSION = '1.0.0'
+VERSION = '1.0.1'
 LAST_UPDATE_ATTEMPT = ''
 SENDING_DATA_SECONDS = 60
 
@@ -454,7 +456,27 @@ def replace_new_xitogent():
         pass
 
     if is_force_update():
-        print('Updated Xitogent started working successfully')
+        print('Xitogent has been updated from v{} to {} successfully'.format(VERSION, find_new_version()))
+
+
+def find_new_version():
+
+    p = subprocess.Popen('xitogent version', stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+
+    stdout, stderr = p.communicate()
+
+    # error
+    if p.returncode != 0:
+        return ''
+
+    stdout = stdout.decode("utf-8")
+
+    found = re.search(r"v(\d+(\.\d+)?(\.\d+)?)", stdout)
+
+    if found:
+        return stdout[found.start():found.end()]
+
+    return ''
 
 
 def is_force_update():
@@ -1307,6 +1329,19 @@ def show_xitogent_status():
     print('%-30s' '%s' % ('Sent sequences', sent_sequences))
     print('%-30s' '%s' % ('Failed sequences', failed_sequences))
 
+
+def convert_human_read_to_byte(size):
+    size_name = ("B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB")
+    match = re.match(r"(\d+(?:\.\d+)?)+([a-z]+)", size, re.I)
+    if not match:
+        return 0
+    size = match.groups()
+    num, unit = float(size[0]), size[1]
+    unit = unit.upper()
+    idx = size_name.index(unit)
+    factor = 1024 ** idx
+    return int(num * factor)
+
 last_bw = {'time': '', 'value': ''}
 last_disk_io = {'time': '', 'value': ''}
 
@@ -1962,8 +1997,592 @@ class Linux:
 
         return []
 
+    @staticmethod
+    def fetch_docker_disk_usage():
+
+        p = subprocess.Popen('docker system df --format="{{json .}}"', stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+
+        stdout, stderr = p.communicate()
+
+        # error
+        if p.returncode != 0:
+            if is_initial_test():
+                return {'status': 'failed', 'message': stderr}
+            return []
+
+        lines = stdout.split(b"\n")
+
+        disk_usages = []
+
+        try:
+            for line in lines:
+
+                if not line:
+                    continue
+
+                temp = json.loads(line)
+
+                temp = dict((k.lower(), v) for k, v in temp.items())
+
+                size = temp['size'] if 'size' in temp else ''
+
+                size = convert_human_read_to_byte(size)
+
+                type = temp['type'] if 'type' in temp else ''
+
+                type = type.lower()
+
+                type = type.replace(' ', '_')
+
+                if size > 0:
+                    disk_usages.append(
+                        {
+                            'type': type,
+                            'active_count': int(temp['active']) if 'active' in temp else '',
+                            'total_count': int(temp['totalcount']) if 'totalcount' in temp else '',
+                            'size': size,
+                        }
+                    )
+        except Exception:
+            pass
+
+        return disk_usages
+
+    @classmethod
+    def fetch_docker_images_containers_and_volumes(cls):
+
+        p = subprocess.Popen('docker system df -v --format="{{json .}}"', stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE,
+                             shell=True)
+
+        stdout, stderr = p.communicate()
+
+        # error
+        if p.returncode != 0:
+            if is_initial_test():
+                return {'status': 'failed', 'message': stderr}
+            return []
+
+        try:
+            lines = stdout.split(b"\n")
+
+            for line in lines:
+
+                if not line:
+                    continue
+
+                temp = json.loads(line)
+
+                temp = dict((k.lower(), v) for k, v in temp.items())
+
+                images = []
+
+                if "images" in temp:
+                    images = cls.extract_docker_images(temp["images"])
+
+                containers = []
+
+                if "containers" in temp:
+                    containers = cls.extract_docker_containers(temp["containers"])
+
+                volumes = []
+
+                if "volumes" in temp:
+                    volumes = cls.extract_docker_volumes(temp["volumes"])
+
+                return {"images": images, "containers": containers, "volumes": volumes}
+
+        except Exception:
+            return []
+
+    @staticmethod
+    def extract_docker_images(data):
+
+        images = []
+
+        try:
+            for image in data:
+                image = dict((k.lower(), v) for k, v in image.items())
+
+                size = image['size'] if 'size' in image else ''
+
+                size = convert_human_read_to_byte(size)
+
+                shared_size = image['sharedsize'] if 'sharedsize' in image else ''
+
+                shared_size = convert_human_read_to_byte(shared_size)
+
+                unique_size = image['uniquesize'] if 'uniquesize' in image else ''
+
+                unique_size = convert_human_read_to_byte(unique_size)
+
+                id = image['id'] if 'id' in image else ''
+
+                id = id.replace('sha256:', '')
+
+                images.append({
+                    'repository': image['repository'] if 'repository' in image else '',
+                    'tag': image['tag'] if 'tag' in image else '',
+                    'id': id[0: 12],
+                    'created_since': image['createdsince'] if 'createdsince' in image else '',
+                    'size': size,
+                    'shared_size': shared_size,
+                    'unique_size': unique_size,
+                    'containers': int(image['containers']) if 'containers' in image else '',
+                })
+
+        except Exception:
+            pass
+
+        return images
+
+    @classmethod
+    def extract_docker_containers(cls, data):
+
+        containers = []
+
+        try:
+            statistics = cls.fetch_docker_containers_statistics()
+
+            for container in data:
+
+                container = dict((k.lower(), v) for k, v in container.items())
+
+                size = container['size'] if 'size' in container else ''
+
+                size = convert_human_read_to_byte(size)
+
+                id = container['id'] if 'id' in container else ''
+
+                id = id[0:12]
+
+                temp = {
+                    'id': id,
+                    'image': container['image'] if 'image' in container else '',
+                    'command': container['command'] if 'command' in container else '',
+                    'running_for': container['runningfor'] if 'runningfor' in container else '',
+                    'status': container['status'] if 'status' in container else '',
+                    'ports': container['ports'] if 'ports' in container else '',
+                    'name': container['names'] if 'names' in container else '',
+                    'size': size,
+                }
+
+                if id in statistics:
+
+                    temp.update(statistics[id])
+
+                    if 'cpu_percent' in temp:
+                        temp['cpu_percent'] = float(temp['cpu_percent'].replace('%', ''))
+
+                    if 'memory_percent' in temp:
+                        temp['memory_percent'] = float(temp['memory_percent'].replace('%', ''))
+
+                    if 'memory_usage' in temp:
+                        del temp['memory_usage']
+                else:
+                    temp['cpu_percent'] = 0
+                    temp['memory_percent'] = 0
+
+                containers.append(temp)
+
+        except Exception:
+            pass
+
+        return containers
+
+    @staticmethod
+    def fetch_docker_containers_statistics():
+
+        p = subprocess.Popen('docker stats --no-stream --format="{{json .}}"', stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             shell=True)
+
+        stdout, stderr = p.communicate()
+
+        # error
+        if p.returncode != 0:
+            if is_initial_test():
+                return {'status': 'failed', 'message': stderr}
+            return {}
+
+        statistics = {}
+
+        try:
+            lines = stdout.split(b"\n")
+
+            for line in lines:
+
+                if not line:
+                    continue
+
+                temp = json.loads(line)
+
+                temp = dict((k.lower(), v) for k, v in temp.items())
+
+                id = temp['id'] if 'id' in temp else ''
+
+                statistics[id] = {'cpu_percent': temp['cpuperc'], 'memory_percent': temp['memperc'],
+                                  'memory_usage': temp['memusage']}
+        except Exception:
+            pass
+
+        return statistics
+
+    @staticmethod
+    def extract_docker_volumes(data):
+
+        volumes = []
+
+        try:
+            for volume in data:
+                volume = dict((k.lower(), v) for k, v in volume.items())
+
+                size = volume['size'] if 'size' in volume else ''
+
+                size = convert_human_read_to_byte(size)
+
+                volumes.append({
+                    'driver': volume['driver'] if 'driver' in volume else '',
+                    'name': volume['name'] if 'name' in volume else '',
+                    'links': int(volume['links']) if 'links' in volume else '',
+                    'size': size,
+                })
+        except Exception:
+            pass
+
+        return volumes
+
+    @staticmethod
+    def fetch_docker_networks():
+
+        p = subprocess.Popen('docker network ls --format="{{json .}}"', stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+
+        stdout, stderr = p.communicate()
+
+        # error
+        if p.returncode != 0:
+            if is_initial_test():
+                return {'status': 'failed', 'message': stderr}
+            return []
+
+        networks = []
+
+        try:
+            lines = stdout.split(b"\n")
+
+            for line in lines:
+
+                if not line:
+                    continue
+
+                network = json.loads(line)
+
+                network = dict((k.lower(), v) for k, v in network.items())
+
+                networks.append(
+                    {
+                        'id': network['id'] if 'id' in network else '',
+                        'name': network['name'] if 'name' in network else '',
+                        'driver': network['driver'] if 'driver' in network else '',
+                        'scope': network['scope'] if 'scope' in network else '',
+                    }
+                )
+        except Exception:
+            pass
+
+        return networks
+
+    @classmethod
+    def fetch_listening_ports(cls):
+
+        p = subprocess.Popen('netstat -lpe', stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+
+        stdout, stderr = p.communicate()
+
+        # error
+        if p.returncode != 0:
+            return []
+
+        ports = []
+
+        try:
+            lines = stdout.split(b"\n")
+
+            unix_header_text = ''
+
+            for line in lines:
+
+                line = line.decode('utf-8')
+
+                is_tcp_port = line.startswith("tcp")
+                is_udp_port = line.startswith("udp")
+                is_unix_port = line.startswith("unix")
+
+                if not line or (not is_tcp_port and not is_udp_port and not is_unix_port):
+                    if 'RefCnt' in line:
+                        unix_header_text = line
+                    continue
+
+                if is_tcp_port or is_udp_port:
+                    port = cls.parse_tcp_or_udp_port(line)
+                else:
+                    port = cls.parse_unix_port(unix_header_text, line)
+
+                ports.append(port)
+
+        except Exception:
+            pass
+
+        return ports
+
+    @staticmethod
+    def parse_tcp_or_udp_port(line):
+
+        keys = [
+            'proto',
+            'recv_q',
+            'send_q',
+            'local_address',
+            'foreign_address',
+            'state',
+            'user',
+            'inode',
+            'pid_program_name'
+        ]
+
+        entry = line.split(maxsplit=len(keys) - 1)
+
+        # check for long program name
+        matching_index = [index for index, s in enumerate(entry) if '/' in s]
+        if len(matching_index) > 0:
+            matching_index = matching_index[0]
+            entry.insert(matching_index, " ".join(entry[matching_index:]))
+            del entry[matching_index+1:]
+
+        #state is empty
+        if len(entry) == len(keys) - 1:
+            entry.insert(5, None)
+
+        port = dict(zip(keys, entry))
+
+        temp = {}
+
+        for name in port:
+
+            try:
+                port[name] = port[name].strip()
+                if name == 'recv_q' or name == 'send_q' or name == 'inode':
+                    port[name] = int(port[name])
+            except Exception:
+                pass
+
+            if name == 'proto':
+                if '6' in port['proto']:
+                    temp['network_protocol'] = 'ipv6'
+                else:
+                    temp['network_protocol'] = 'ipv4'
+
+            elif name == 'pid_program_name':
+
+                if port[name] == '-':
+                    port[name] = None
+                    temp['pid'] = 0
+                    temp['program_name'] = ''
+
+                if port[name]:
+                    if '/' in port[name]:
+                        pid = port[name].split('/', maxsplit=1)[0]
+                        name = port[name].split('/', maxsplit=1)[1]
+                        temp['pid'] = int(pid)
+                        temp['program_name'] = name
+                    else:
+                        temp['pid'] = 0
+                        temp['program_name'] = ''
+
+            elif name == 'local_address':
+                if port[name]:
+                    ladd = port[name].rsplit(':', maxsplit=1)[0]
+                    lport = port[name].rsplit(':', maxsplit=1)[1]
+                    temp['local_address'] = ladd
+                    temp['local_port'] = lport
+
+            elif name == 'foreign_address':
+                if port[name]:
+                    fadd = port[name].rsplit(':', maxsplit=1)[0]
+                    fport = port[name].rsplit(':', maxsplit=1)[1]
+                    temp['foreign_address'] = fadd
+                    temp['foreign_port'] = fport
+
+        port.update(temp)
+
+        if 'state' in port:
+            del port['state']
+
+        if 'pid_program_name' in port:
+            del port['pid_program_name']
+
+        return port
+
+    @staticmethod
+    def parse_unix_port(header_text, line):
+
+        headers = [
+            'proto',
+            'refcnt',
+            'flags',
+            'type',
+            'state',
+            'i_node',
+            'program_name',
+            'path'
+        ]
+
+        header_text = header_text.lower()
+        header_text = header_text.replace('pid/program name', 'program_name')
+        header_text = header_text.replace('i-node', 'i_node')
+        header_text = header_text.replace('-', '_')
+
+        # get the column # of first letter of "state"
+        state_col = header_text.find('state')
+
+        # get the program name column area
+        pn_start = header_text.find('program_name')
+        pn_end = header_text.find('path') - 1
+
+        # remove [ and ] from each line
+        entry = line.replace('[ ]', '---')
+        entry = entry.replace('[', ' ').replace(']', ' ')
+
+        # find program_name column area and substitute spaces with \u2063 there
+        old_pn = entry[pn_start:pn_end]
+        new_pn = old_pn.replace(' ', '\u2063')
+        entry = entry.replace(old_pn, new_pn)
+
+        entry_list = entry.split(maxsplit=len(headers) - 1)
+        # check column # to see if state column is populated
+        if entry[state_col] in string.whitespace:
+            entry_list.insert(4, None)
+
+        port = dict(zip(headers, entry_list))
+
+        temp = {}
+
+        for name in port:
+
+            try:
+                port[name] = port[name].strip()
+                if name == 'refcnt' or name == 'i_node':
+                    port[name] = int(port[name])
+            except Exception:
+                pass
+
+            if name == 'flags':
+                if port[name] == '---':
+                    port[name] = None
+
+            elif name == 'program_name':
+
+                if port[name] == '-':
+                    port[name] = None
+                    temp['pid'] = 0
+                    temp['program_name'] = ''
+
+                if port[name]:
+
+                    # fix program_name field to turn \u2063 back to spaces
+                    old_d_pn = port[name]
+                    new_d_pn = old_d_pn.replace('\u2063', ' ')
+                    port[name] = new_d_pn
+
+                    port[name] = port[name].strip()
+
+                    if '/' in port[name]:
+                        pid = port[name].split('/', maxsplit=1)[0]
+                        name = port[name].split('/', maxsplit=1)[1]
+                        temp['pid'] = int(pid)
+                        temp['program_name'] = name
+                    else:
+                        temp['pid'] = 0
+                        temp['program_name'] = ''
+
+        port.update(temp)
+
+        if 'state' in port:
+            del port['state']
+
+        return port
+
+    @staticmethod
+    def fetch_kernel_routes():
+
+        p = subprocess.Popen('netstat -r', stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+
+        stdout, stderr = p.communicate()
+
+        # error
+        if p.returncode != 0:
+            return []
+
+        routes = []
+
+        try:
+            data = jc.parsers.netstat.parse(stdout.decode("utf-8"))
+
+            for route in data:
+                routes.append({
+                    'destination': route['destination'] if 'destination' in route else '',
+                    'gateway': route['gateway'] if 'gateway' in route else '',
+                    'genmask': route['genmask'] if 'genmask' in route else '',
+                    'flags': route['route_flags'] if 'route_flags' in route else '',
+                    'mss': route['mss'] if 'mss' in route else '',
+                    'window': route['window'] if 'window' in route else '',
+                    'irtt': route['irtt'] if 'irtt' in route else '',
+                    'iface': route['iface'] if 'iface' in route else '',
+                })
+        except Exception:
+            pass
+
+        return routes
+
+    @staticmethod
+    def fetch_network_interfaces():
+
+        p = subprocess.Popen('netstat -i', stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+
+        stdout, stderr = p.communicate()
+
+        # error
+        if p.returncode != 0:
+            return []
+
+        interfaces = []
+
+        try:
+            data = jc.parsers.netstat.parse(stdout.decode("utf-8"))
+
+            for interface in data:
+                interfaces.append({
+                    'iface': interface['iface'] if 'iface' in interface else '',
+                    'mtu': interface['mtu'] if 'mtu' in interface else '',
+                    'rx_ok': interface['rx_ok'] if 'rx_ok' in interface else '',
+                    'rx_err': interface['rx_err'] if 'rx_err' in interface else '',
+                    'rx_drp': interface['rx_drp'] if 'rx_drp' in interface else '',
+                    'rx_ovr': interface['rx_ovr'] if 'rx_ovr' in interface else '',
+                    'tx_ok': interface['tx_ok'] if 'tx_ok' in interface else '',
+                    'tx_err': interface['tx_err'] if 'tx_err' in interface else '',
+                    'tx_drp': interface['tx_drp'] if 'tx_drp' in interface else '',
+                    'tx_ovr': interface['tx_ovr'] if 'tx_ovr' in interface else '',
+                    'flg': interface['flg'] if 'flg' in interface else '',
+                })
+        except Exception:
+            pass
+
+        return interfaces
+
     @classmethod
     def fetch_data(cls):
+
+        docker_data = cls.fetch_docker_images_containers_and_volumes()
+
         return {
             'description': cls.fetch_system_info(),
             'statistics': {
@@ -1980,8 +2599,19 @@ class Linux:
                 'cpu_consumer': cls.find_top_five_cpu_consumer_processes(),
                 'memory_consumer': cls.find_top_five_memory_consumer_processes(),
             },
+            'docker': {
+                'disk_usage': Linux.fetch_docker_disk_usage(),
+                'images': docker_data['images'] if 'images' in docker_data else [],
+                'containers': docker_data['containers'] if 'containers' in docker_data else [],
+                'volumes': docker_data['volumes'] if 'volumes' in docker_data else [],
+                'networks': Linux.fetch_docker_networks(),
+            },
+            'netstat': {
+                'ports': Linux.fetch_listening_ports(),
+                'kernel_routes': Linux.fetch_kernel_routes(),
+                'network_interfaces': Linux.fetch_network_interfaces(),
+            }
         }
-
 
 if is_show_commands_mode():
     show_commands()
