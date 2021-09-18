@@ -37,6 +37,9 @@ Xitogent is successfully tested on the following distributions but it’s proofe
  - Ubuntu 14.04/15.04/16.04/18.04/19.04/20.04
  - Debian 5/6/7/8/9/10
  - OpenSuse 15.1
+ - Rocky Linux 8.4
+ - CloudLinux 8.4
+ - AlmaLinux 8.4
 
 # Installation Manual
 
@@ -140,12 +143,15 @@ Here is an example of a Xitogent systemd service file content:
     [Unit]
     Description=Xitogent Service
     After=network.target
-    
+
     [Service]
-    Type=simple
-    ExecStart=/usr/bin/python2 /etc/xitogent/xitogent.py start -c /etc/xitogent/xitogent.conf
-    ExecStop=/bin/kill -s TERM $MAINPID
-    
+    Type=forking
+    PIDFile=/var/run/xitogent.pid
+    ExecStart=/usr/bin/python /etc/xitogent/xitogent.py start -d -c /etc/xitogent/xitogent.conf
+    ExecStop=/usr/bin/python /etc/xitogent/xitogent.py stop
+    Restart=on-failure
+    RestartSec=10s
+
     [Install]
     WantedBy=multi-user.target
 

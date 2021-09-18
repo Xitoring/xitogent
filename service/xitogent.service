@@ -3,9 +3,12 @@ Description=Xitogent Service
 After=network.target
 
 [Service]
-Type=simple
-ExecStart=/usr/bin/python2 /etc/xitogent/xitogent.py start -c /etc/xitogent/xitogent.conf
-ExecStop=/bin/kill -s TERM $MAINPID
+Type=forking
+PIDFile=/var/run/xitogent.pid
+ExecStart=/usr/bin/python /etc/xitogent/xitogent.py start -d -c /etc/xitogent/xitogent.conf
+ExecStop=/usr/bin/python /etc/xitogent/xitogent.py stop
+Restart=on-failure
+RestartSec=10s
 
 [Install]
 WantedBy=multi-user.target

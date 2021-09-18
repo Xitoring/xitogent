@@ -41,7 +41,7 @@ CONFIG_FILE = '/etc/xitogent/xitogent.conf'
 PID_FILE = '/var/run/xitogent.pid'
 
 #variables are used for auto updating
-VERSION = '1.0.1'
+VERSION = '1.0.2'
 LAST_UPDATE_ATTEMPT = ''
 SENDING_DATA_SECONDS = 60
 
@@ -596,17 +596,9 @@ def is_running():
 
 
 def is_start_as_daemon():
-    if '-d' in sys.argv:
+    if '-d' in sys.argv or '--daemon' in sys.argv:
         return True
     return False
-
-
-def check_start_as_daemon():
-
-    if '-d' not in sys.argv:
-        return None
-
-    daemonize()
 
 
 def daemonize():
@@ -724,7 +716,8 @@ def send_data(config_data):
 
         params = {'data': Linux.fetch_data(), 'version': VERSION}
 
-        print(params)
+        if not has_quiet_flag() and has_verbose_flag():
+            print(params)
 
         headers = {'Accept': 'application/json', 'uid': config_data['uid'], 'password': config_data['password']}
 
@@ -735,7 +728,11 @@ def send_data(config_data):
         #success
         if response.status_code == 200:
 
-            print('\n' + now.strftime("%Y-%m-%d %H:%M:%S") + ' - HTTP status:200\n')
+            if not has_quiet_flag():
+                if has_verbose_flag():
+                    print('\n' + now.strftime("%Y-%m-%d %H:%M:%S") + ' - HTTP status:200\n')
+                else:
+                    print('\n' + now.strftime("%Y-%m-%d %H:%M:%S") + ' - sequence sent\n')
 
             response = json.loads(response.text)
 
@@ -752,64 +749,120 @@ def send_data(config_data):
 
         #Bad request
         if response.status_code == 400:
+
             errors = []
             result = json.loads(response.text)
+
             if 'pause_until' in result:
                 modify_config_file({'pause_until': str(result['pause_until'])})
                 del result['pause_until']
+
             for i in result:
                 if isinstance(result[i], list):
                     errors.append(result[i][0])
                 else:
                     errors.append(result[i])
-            print("\n" + message + ", ".join(errors))
+
+            if not has_quiet_flag():
+                if has_verbose_flag():
+                    print("\n" + message + ", ".join(errors))
+                else:
+                    print('\n' + now.strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
+
             increment_variable('failed_sequences')
+
             return None
 
         #Unauthorized
         if response.status_code == 401:
-            print('\n' + message + 'Unauthorized action caused by Invalid Password or UID' + '\n')
+
+            if not has_quiet_flag():
+                if has_verbose_flag():
+                    print('\n' + message + 'Unauthorized action caused by Invalid Password or UID' + '\n')
+                else:
+                    print('\n' + now.strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
+
             increment_variable('failed_sequences')
+
             return None
 
         #url not found or uid is invalid
         if response.status_code == 404:
             try:
                 result = json.loads(response.text)
-                print('\n' + message + str(result['message']) + '\n')
+                if not has_quiet_flag():
+                    if has_verbose_flag():
+                        print('\n' + message + str(result['message']) + '\n')
+                    else:
+                        print('\n' + now.strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
             except Exception:
-                print('\n' + message + 'URL not found' + '\n')
+                if not has_quiet_flag():
+                    if has_verbose_flag():
+                        print('\n' + message + 'URL not found' + '\n')
+                    else:
+                        print('\n' + now.strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
             increment_variable('failed_sequences')
             return None
 
-        #error
-        print(message + str(response.text))
+        if not has_quiet_flag():
+            if has_verbose_flag():
+                print('\n' + message + str(response.text))
+            else:
+                print('\n' + now.strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
 
         increment_variable('failed_sequences')
 
     except HTTPError:
-        print('\nHTTP Exception for ' + url + '\n')
+        if not has_quiet_flag():
+            if has_verbose_flag():
+                print('\nHTTP Exception for ' + url + '\n')
+            else:
+                print('\n' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
         increment_variable('failed_sequences')
     except ConnectTimeout:
-        print('\nTimed out while connecting to the host\n')
+        if not has_quiet_flag():
+            if has_verbose_flag():
+                print('\nTimed out while connecting to the host\n')
+            else:
+                print('\n' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
         increment_variable('failed_sequences')
     except ReadTimeout:
-        print('\nTimed out while receiving data from the host\n')
+        if not has_quiet_flag():
+            if has_verbose_flag():
+                print('\nTimed out while receiving data from the host\n')
+            else:
+                print('\n' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
         increment_variable('failed_sequences')
     except Timeout:
-        print('\nTimed out while requesting to the host\n')
+        if not has_quiet_flag():
+            if has_verbose_flag():
+                print('\nTimed out while requesting to the host\n')
+            else:
+                print('\n' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
         increment_variable('failed_sequences')
     except ConnectionError:
-        print('\nFailed to establish a connection\n')
+        if not has_quiet_flag():
+            if has_verbose_flag():
+                print('\nFailed to establish a connection\n')
+            else:
+                print('\n' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
         node_url = retrieve_node_url(config_data['uid'], config_data['password'])
         if node_url:
             config_data['node_url'] = add_http_to_url(node_url)
         increment_variable('failed_sequences')
     except TooManyRedirects:
-        print('\nToo many redirects\n')
+        if not has_quiet_flag():
+            if has_verbose_flag():
+                print('\nToo many redirects\n')
+            else:
+                print('\n' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
         increment_variable('failed_sequences')
     except (requests.exceptions.InvalidURL, requests.exceptions.MissingSchema):
-        print('\nURL is improperly formed or cannot be parsed\n')
+        if not has_quiet_flag():
+            if has_verbose_flag():
+                print('\nURL is improperly formed or cannot be parsed\n')
+            else:
+                print('\n' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
         node_url = retrieve_node_url(config_data['uid'], config_data['password'])
         config_data['node_url'] = add_http_to_url(node_url)
         increment_variable('failed_sequences')
@@ -1063,7 +1116,7 @@ def is_show_commands_mode():
 def show_commands():
     print('%-15s' '%s' % ('Xitogent v' + VERSION, '('+ CORE_URL + ')'))
     print("", '')
-    print('%-15s' '%s' % ('register', 'Add a device'))
+    print('%-15s' '%s' % ('register', 'Add a server'))
     print('%-15s' '%s' % ('', 'options:'))
     print('%-15s' '%-16s %s' % ('', '--key', 'Your unique account key for adding new server - found on your control panel '))
     print('%-15s' '%-16s %s' % ('', '--group', 'Server\'s group name as string'))
@@ -1081,15 +1134,17 @@ def show_commands():
     print('%-15s' '%-16s %s' % ('', '--module_pop3', 'Create pop3 module automatically'))
     print('%-15s' '%s' % ('start', 'Start Xitogent (sending data)'))
     print('%-15s' '%s' % ('', 'options:'))
-    print('%-15s' '%-16s %s' % ('', '-d', 'Start as daemon'))
+    print('%-15s' '%-16s %s' % ('', '--daemon', 'Start as daemon'))
+    print('%-15s' '%-16s %s' % ('', '--verbose', 'Verbose mode. Causes Xitogent to print debugging messages about its progress.\n This is helpful in debugging connection, authentication, and configuration problems'))
+    print('%-15s' '%-16s %s' % ('', '--quiet', 'Silent mode'))
     print('%-15s' '%s' % ('stop', 'Stop Xitogent'))
     print('%-15s' '%s' % ('restart', 'Restart Xitogent'))
-    print('%-15s' '%s' % ('uninstall', 'Uninstall Xitogent and remove device on your control panel'))
+    print('%-15s' '%s' % ('uninstall', 'Uninstall Xitogent and remove server on your control panel'))
     print('%-15s' '%s' % ('update', 'Force update Xitogent'))
     print('%-15s' '%s' % ('pause', 'Pause Xitogent'))
     print('%-15s' '%s' % ('', 'options:'))
     print('%-15s' '%s' % ('', 'm (minute) _ h (hour) _ d (day) _ w (week)'))
-    print('%-15s' '%s' % ('', 'Usage: Xitogent pause 3d'))
+    print('%-15s' '%s' % ('', 'Usage: xitogent pause 3d'))
     print('%-15s' '%s' % ('unpause', 'Unpause Xitogent'))
     print('%-15s' '%s' % ('help', 'Show Xitogent\' s commands'))
     print('%-15s' '%s' % ('version', 'Show Xitogent\' s version'))
@@ -1341,6 +1396,18 @@ def convert_human_read_to_byte(size):
     idx = size_name.index(unit)
     factor = 1024 ** idx
     return int(num * factor)
+
+
+def has_verbose_flag():
+    if '--verbose' in sys.argv:
+        return True
+    return False
+
+
+def has_quiet_flag():
+    if '--quiet' in sys.argv:
+        return True
+    return False
 
 last_bw = {'time': '', 'value': ''}
 last_disk_io = {'time': '', 'value': ''}
@@ -1741,9 +1808,17 @@ class Linux:
 
         # python 2.6
         if sys.version_info[0] == 2 and sys.version_info[1] == 6:
-            return cls.bw_2_6()
+            return cls.filter_interfaces(cls.bw_2_6())
 
-        return psutil.net_io_counters(pernic=True)
+        return cls.filter_interfaces(psutil.net_io_counters(pernic=True))
+
+    @staticmethod
+    def filter_interfaces(interfaces):
+        for name in interfaces.copy():
+            if name.startswith('veth') or name.startswith('br') or name == 'lo':
+                del interfaces[name]
+
+        return interfaces
 
     @staticmethod
     def calculate_bw_change(interfaces_t1, interfaces_t2, last_value_time=0):
@@ -2528,6 +2603,12 @@ class Linux:
             data = jc.parsers.netstat.parse(stdout.decode("utf-8"))
 
             for route in data:
+
+                iface = route['iface'] if 'iface' in route else ''
+                
+                if iface.startswith('veth') or iface.startswith('br') or iface == 'lo':
+                    continue
+
                 routes.append({
                     'destination': route['destination'] if 'destination' in route else '',
                     'gateway': route['gateway'] if 'gateway' in route else '',
@@ -2536,7 +2617,7 @@ class Linux:
                     'mss': route['mss'] if 'mss' in route else '',
                     'window': route['window'] if 'window' in route else '',
                     'irtt': route['irtt'] if 'irtt' in route else '',
-                    'iface': route['iface'] if 'iface' in route else '',
+                    'iface': iface,
                 })
         except Exception:
             pass
@@ -2560,8 +2641,14 @@ class Linux:
             data = jc.parsers.netstat.parse(stdout.decode("utf-8"))
 
             for interface in data:
+
+                iface = interface['iface'] if 'iface' in interface else ''
+                
+                if iface.startswith('veth') or iface.startswith('br') or iface == 'lo':
+                    continue
+                
                 interfaces.append({
-                    'iface': interface['iface'] if 'iface' in interface else '',
+                    'iface': iface,
                     'mtu': interface['mtu'] if 'mtu' in interface else '',
                     'rx_ok': interface['rx_ok'] if 'rx_ok' in interface else '',
                     'rx_err': interface['rx_err'] if 'rx_err' in interface else '',
