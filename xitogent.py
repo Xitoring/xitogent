@@ -41,7 +41,7 @@ CONFIG_FILE = '/etc/xitogent/xitogent.conf'
 PID_FILE = '/var/run/xitogent.pid'
 
 #variables are used for auto updating
-VERSION = '1.0.2'
+VERSION = '1.0.3'
 LAST_UPDATE_ATTEMPT = ''
 SENDING_DATA_SECONDS = 60
 
@@ -100,7 +100,10 @@ def add_device():
 
         response.raise_for_status()
 
-        modify_config_file(json.loads(response.text))
+        data = decode_json(response.text)
+
+        if data is not None:
+            modify_config_file(data)
 
         print('Server has been registered successfully')
 
@@ -117,9 +120,12 @@ def add_device():
         #Bad request
         if status_code == 400:
             errors = []
-            result = json.loads(e.response.text)
-            for i in result:
-                errors.append(result[i][0])
+            result = decode_json(e.response.text)
+            if result is None:
+                errors.append(e.response.text)
+            else:
+                for i in result:
+                    errors.append(result[i][0])
             sys.exit(message + ", ".join(errors))
 
         #Unauthorize
@@ -128,8 +134,12 @@ def add_device():
 
         #Access denied
         if status_code == 403:
-            temp = json.loads(e.response.text)
-            sys.exit(message + temp['message'])
+            temp = decode_json(e.response.text)
+            if temp is None:
+                sys.exit(message + e.response.text)
+            else:
+                text = temp['message'] if 'message' in temp else ''
+                sys.exit(message + text)
 
         #Invalid url
         if status_code == 404:
@@ -149,6 +159,13 @@ def add_device():
         sys.exit('Too many redirects')
     except requests.exceptions.InvalidURL:
         sys.exit('URL is improperly formed or cannot be parsed')
+
+
+def decode_json(str):
+    try:
+        return json.loads(str)
+    except:
+        return None
 
 
 def is_dev():
@@ -337,8 +354,7 @@ def get_device_info(uid, password):
 
         return json.loads(response.text)
 
-    except (ConnectTimeout, HTTPError, ReadTimeout, Timeout, ConnectionError, TooManyRedirects) as e:
-
+    except (ConnectTimeout, HTTPError, ReadTimeout, Timeout, ConnectionError, TooManyRedirects, json.decoder.JSONDecodeError) as e:
         #Unauthorized
         if e.__class__.__name__ == 'HTTPError' and e.response.status_code == 401:
             sys.exit('Unauthorized action caused by Invalid Password or UID')
@@ -353,15 +369,17 @@ def auto_update():
     download_new_xitogent()
     if validate_new_xitogent():
         replace_new_xitogent()
+    else:
+        run_command('rm -rf /etc/xitogent/test')
 
 
 def download_new_xitogent():
     try:
 
         if os.path.exists('/etc/xitogent/test'):
-            os.system('rm -rf /etc/xitogent/test/*')
-        else:
-            os.mkdir('/etc/xitogent/test')
+            os.system('rm -rf /etc/xitogent/test')
+
+        os.mkdir('/etc/xitogent/test')
 
         urlretrieve(AGENT_URL, '/etc/xitogent/test/xitogent')
 
@@ -693,7 +711,7 @@ def inquire_pause_status():
         if not response['is_paused']:
             modify_config_file({'pause_until': ''}, delete_mode=True)
 
-    except (ConnectTimeout, HTTPError, ReadTimeout, Timeout, ConnectionError, TooManyRedirects) as e:
+    except (ConnectTimeout, HTTPError, ReadTimeout, Timeout, ConnectionError, TooManyRedirects, json.decoder.JSONDecodeError) as e:
         pass
 
 
@@ -729,17 +747,14 @@ def send_data(config_data):
         if response.status_code == 200:
 
             if not has_quiet_flag():
-                if has_verbose_flag():
-                    print('\n' + now.strftime("%Y-%m-%d %H:%M:%S") + ' - HTTP status:200\n')
-                else:
-                    print('\n' + now.strftime("%Y-%m-%d %H:%M:%S") + ' - sequence sent\n')
+                print('\n' + now.strftime("%Y-%m-%d %H:%M:%S") + ' - HTTP status:200\n')
 
-            response = json.loads(response.text)
+            response = decode_json(response.text)
 
-            needs_update = 'update' in response and response['update']
-
-            if needs_update and can_be_updated():
-                auto_update()
+            if response is not None:
+                needs_update = 'update' in response and response['update']
+                if needs_update and can_be_updated():
+                    auto_update()
 
             increment_variable('sent_sequences')
 
@@ -751,23 +766,24 @@ def send_data(config_data):
         if response.status_code == 400:
 
             errors = []
-            result = json.loads(response.text)
+            result = decode_json(response.text)
 
-            if 'pause_until' in result:
-                modify_config_file({'pause_until': str(result['pause_until'])})
-                del result['pause_until']
+            if result is not None:
+                if 'pause_until' in result:
+                    modify_config_file({'pause_until': str(result['pause_until'])})
+                    del result['pause_until']
 
-            for i in result:
-                if isinstance(result[i], list):
-                    errors.append(result[i][0])
-                else:
-                    errors.append(result[i])
+                for i in result:
+                    if isinstance(result[i], list):
+                        errors.append(result[i][0])
+                    else:
+                        errors.append(result[i])
 
             if not has_quiet_flag():
                 if has_verbose_flag():
                     print("\n" + message + ", ".join(errors))
                 else:
-                    print('\n' + now.strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
+                    print('\n' + now.strftime("%Y-%m-%d %H:%M:%S") + ' - HTTP status:400\n')
 
             increment_variable('failed_sequences')
 
@@ -780,7 +796,7 @@ def send_data(config_data):
                 if has_verbose_flag():
                     print('\n' + message + 'Unauthorized action caused by Invalid Password or UID' + '\n')
                 else:
-                    print('\n' + now.strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
+                    print('\n' + now.strftime("%Y-%m-%d %H:%M:%S") + ' - HTTP status:401\n')
 
             increment_variable('failed_sequences')
 
@@ -794,13 +810,13 @@ def send_data(config_data):
                     if has_verbose_flag():
                         print('\n' + message + str(result['message']) + '\n')
                     else:
-                        print('\n' + now.strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
+                        print('\n' + now.strftime("%Y-%m-%d %H:%M:%S") + ' - HTTP status:404\n')
             except Exception:
                 if not has_quiet_flag():
                     if has_verbose_flag():
                         print('\n' + message + 'URL not found' + '\n')
                     else:
-                        print('\n' + now.strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
+                        print('\n' + now.strftime("%Y-%m-%d %H:%M:%S") + ' - HTTP status:404\n')
             increment_variable('failed_sequences')
             return None
 
@@ -808,44 +824,45 @@ def send_data(config_data):
             if has_verbose_flag():
                 print('\n' + message + str(response.text))
             else:
-                print('\n' + now.strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
+                print('\n' + now.strftime("%Y-%m-%d %H:%M:%S") + ' - HTTP status:500\n')
 
         increment_variable('failed_sequences')
 
-    except HTTPError:
+    except HTTPError as e:
         if not has_quiet_flag():
             if has_verbose_flag():
                 print('\nHTTP Exception for ' + url + '\n')
             else:
-                print('\n' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
+                status_code = e.response.status_code
+                print('\n' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ' - HTTP status:' + status_code + '\n')
         increment_variable('failed_sequences')
     except ConnectTimeout:
         if not has_quiet_flag():
             if has_verbose_flag():
                 print('\nTimed out while connecting to the host\n')
             else:
-                print('\n' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
+                print('\n' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ' - Connection timeout\n')
         increment_variable('failed_sequences')
     except ReadTimeout:
         if not has_quiet_flag():
             if has_verbose_flag():
                 print('\nTimed out while receiving data from the host\n')
             else:
-                print('\n' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
+                print('\n' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ' - Read timeout\n')
         increment_variable('failed_sequences')
     except Timeout:
         if not has_quiet_flag():
             if has_verbose_flag():
                 print('\nTimed out while requesting to the host\n')
             else:
-                print('\n' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
+                print('\n' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ' - Timeout\n')
         increment_variable('failed_sequences')
     except ConnectionError:
         if not has_quiet_flag():
             if has_verbose_flag():
                 print('\nFailed to establish a connection\n')
             else:
-                print('\n' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
+                print('\n' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ' - Connection error\n')
         node_url = retrieve_node_url(config_data['uid'], config_data['password'])
         if node_url:
             config_data['node_url'] = add_http_to_url(node_url)
@@ -855,14 +872,14 @@ def send_data(config_data):
             if has_verbose_flag():
                 print('\nToo many redirects\n')
             else:
-                print('\n' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
+                print('\n' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ' - Too many redirects\n')
         increment_variable('failed_sequences')
     except (requests.exceptions.InvalidURL, requests.exceptions.MissingSchema):
         if not has_quiet_flag():
             if has_verbose_flag():
                 print('\nURL is improperly formed or cannot be parsed\n')
             else:
-                print('\n' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ' - sequence failed\n')
+                print('\n' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ' - HTTP status:404\n')
         node_url = retrieve_node_url(config_data['uid'], config_data['password'])
         config_data['node_url'] = add_http_to_url(node_url)
         increment_variable('failed_sequences')
@@ -2401,6 +2418,8 @@ class Linux:
                     port = cls.parse_tcp_or_udp_port(line)
                 else:
                     port = cls.parse_unix_port(unix_header_text, line)
+                    if port['path'] in (p['path'] for p in ports if 'path' in p):
+                        continue
 
                 ports.append(port)
 
