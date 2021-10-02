@@ -9,6 +9,7 @@ import requests
 import re
 import psutil
 import pkgutil
+import pickle
 import os.path
 import os
 import math
@@ -17,10 +18,7 @@ import jc.parsers.netstat
 import datetime
 import collections
 import atexit
-if sys.version_info[0] >= 3: from urllib.request import urlretrieve
-if sys.version_info[0] < 3: from urllib import urlretrieve
 from requests import ReadTimeout, ConnectTimeout, HTTPError, Timeout, ConnectionError, TooManyRedirects
-from localStoragePy import localStoragePy
 
 #add cert data for the requests package
 
@@ -41,11 +39,36 @@ CONFIG_FILE = '/etc/xitogent/xitogent.conf'
 PID_FILE = '/var/run/xitogent.pid'
 
 #variables are used for auto updating
-VERSION = '1.0.3'
+VERSION = '1.0.4'
 LAST_UPDATE_ATTEMPT = ''
 SENDING_DATA_SECONDS = 60
 
-localStorage = localStoragePy("xitogent", 'text')
+
+def reset_items():
+    try:
+        if os.path.exists('/var/tmp/xitogent'):
+            os.system('rm -rf /var/tmp/xitogent')
+        os.mkdir('/var/tmp/xitogent')
+    except:
+        pass
+
+
+def set_item(key, value):
+    try:
+        file = open('/var/tmp/xitogent/' + key, 'wb')
+        pickle.dump({key: value}, file)
+        file.close()
+    except:
+        pass
+
+
+def get_item(key):
+    try:
+        with open('/var/tmp/xitogent/' + key, 'rb') as f:
+            temp = pickle.load(f)
+            return temp[key]
+    except:
+        return 0
 
 
 def modify_config_file(data, delete_mode=False):
@@ -143,7 +166,7 @@ def add_device():
 
         #Invalid url
         if status_code == 404:
-            sys.exit(message + 'Device add URL is invalid')
+            sys.exit(message + 'Server add URL is invalid')
 
         sys.exit(message + 'Unexpected error happened')
 
@@ -242,19 +265,19 @@ def find_argument_value(argument):
     return ''
 
 
-def read_config_file(checking_version=False):
+def read_config_file(checking_version=False, delete_device=False):
 
     config_path = get_config_path()
 
     if not os.path.isfile(config_path):
-        if checking_version:
+        if checking_version or delete_device:
             return {}
         else:
             sys.exit('Config file not found at the default path')
     try:
         f = open(config_path, 'r')
     except IOError:
-        if checking_version:
+        if checking_version or delete_device:
             return {}
         else:
             sys.exit('Config file not found at the default path')
@@ -294,15 +317,18 @@ def get_config_path():
     return CONFIG_FILE
 
 
-def read_config():
+def read_config(delete_device=False):
 
-    data = read_config_file()
+    data = read_config_file(delete_device=delete_device)
 
     if 'password' not in data:
         data['password'] = ''
 
     if 'uid' not in data:
-        sys.exit('UID does not exist in the config file')
+        if delete_device:
+            data['uid'] = ''
+        else:
+            sys.exit('UID does not exist in the config file')
 
     if 'node_url' not in data:
         data['node_url'] = retrieve_node_url(data['uid'], data['password'])
@@ -366,7 +392,8 @@ def get_device_info(uid, password):
 def auto_update():
     global LAST_UPDATE_ATTEMPT
     LAST_UPDATE_ATTEMPT = time.time()
-    download_new_xitogent()
+    if not download_new_xitogent():
+        return None
     if validate_new_xitogent():
         replace_new_xitogent()
     else:
@@ -375,20 +402,75 @@ def auto_update():
 
 def download_new_xitogent():
     try:
+        if os.path.exists('/etc/xitogent/test') and not run_command('rm -rf /etc/xitogent/test'):
+            message = 'Failed to remove the test directory'
+            report_failed_update(message)
+            if is_force_update():
+                sys.exit(message)
+            return False
 
-        if os.path.exists('/etc/xitogent/test'):
-            os.system('rm -rf /etc/xitogent/test')
+        try:
+            os.mkdir('/etc/xitogent/test')
+        except OSError as e:
+            message = 'Failed to create the test directory'
+            report_failed_update(message + '(' + str(e) + ')')
+            if is_force_update():
+                sys.exit(message)
+            return False
 
-        os.mkdir('/etc/xitogent/test')
+        r = requests.get(AGENT_URL, allow_redirects=True)
 
-        urlretrieve(AGENT_URL, '/etc/xitogent/test/xitogent')
+        r.raise_for_status()
 
-        os.chmod('/etc/xitogent/test/xitogent', 0o755)
+        try:
+            open('/etc/xitogent/test/xitogent', 'wb').write(r.content)
+        except OSError as e:
+            message = 'Failed to move new xitogent into test directory'
+            report_failed_update(message + '(' + str(e) + ')')
+            if is_force_update():
+                sys.exit(message)
+            return False
 
-    except Exception as e:
+        try:
+            os.chmod('/etc/xitogent/test/xitogent', 0o755)
+        except OSError as e:
+            message = 'Failed to change mode of new xitogent file'
+            report_failed_update(message + '(' + str(e) + ')')
+            if is_force_update():
+                sys.exit(message)
+            return False
+
+        return True
+
+    except HTTPError as e:
+        report_failed_update(str(e))
+        status_code = e.response.status_code
+        if status_code == 404 and is_force_update():
+            sys.exit('Xitogent url is invalid')
         if is_force_update():
             sys.exit('Downloading new Xitogent failed')
-        pass
+    except requests.exceptions.SSLError as e:
+        report_failed_update(str(e))
+        if is_force_update():
+            sys.exit('SSL handshake failed.')
+    except requests.exceptions.Timeout as e:
+        report_failed_update(str(e))
+        if is_force_update():
+            sys.exit('Request to the xitogent url has been Timed out')
+    except (requests.exceptions.InvalidURL, requests.exceptions.MissingSchema) as e:
+        report_failed_update(str(e))
+        if is_force_update():
+            sys.exit('Xitogent url is improperly formed or cannot be parsed')
+    except TooManyRedirects as e:
+        report_failed_update(str(e))
+        if is_force_update():
+            sys.exit('Too many redirects')
+    except Exception as e:
+        report_failed_update(str(e))
+        if is_force_update():
+            sys.exit('Downloading new Xitogent failed')
+
+    return False
 
 
 def validate_new_xitogent():
@@ -550,7 +632,7 @@ def start():
     if is_running():
         sys.exit('Already running')
 
-    reset_variables()
+    reset_items()
 
     if is_start_as_daemon():
         daemonize()
@@ -559,7 +641,7 @@ def start():
 
     config_data = read_config()
 
-    localStorage.setItem('uptime', int(time.time()))
+    set_item('uptime', int(time.time()))
 
     while True:
         if not is_device_paused():
@@ -572,12 +654,12 @@ def start():
 
 def increment_variable(name):
 
-    old_value = localStorage.getItem(name)
+    old_value = get_item(name)
 
     if old_value:
-        localStorage.setItem(name, int(old_value) + 1)
+        set_item(name, int(old_value) + 1)
     else:
-        localStorage.setItem(name, 1)
+        set_item(name, 1)
 
 
 def is_process_running(pid):
@@ -914,29 +996,32 @@ def is_uninstall():
 
 def uninstall():
 
-    uninstall_xitogent = prompt("Are you sure you want to uninstall Xitogent?[y/N]:")
+    try:
 
-    if uninstall_xitogent.lower() != 'y':
-        sys.exit(0)
+        uninstall_xitogent = prompt("Are you sure you want to uninstall Xitogent?[y/N]:")
 
-    delete_from_database = prompt("Delete the Device from database?[y/N]:")
+        if uninstall_xitogent.lower() != 'y':
+            sys.exit(0)
 
-    if delete_from_database.lower() != 'y':
+        delete_from_database = prompt("Delete the server from database?[y/N]:")
+
+        if delete_from_database.lower() != 'y':
+            delete_xitogent()
+            sys.exit(0)
+
+        delete_device()
+
         delete_xitogent()
+
         sys.exit(0)
-
-    delete_device()
-
-    print('This Device has been deleted from the database successfully')
-
-    delete_xitogent()
-
-    sys.exit(0)
+    except (KeyboardInterrupt, EOFError):
+        print('\n')
+        sys.exit(0)
 
 
 def delete_device():
     try:
-        config_data = read_config()
+        config_data = read_config(delete_device=True)
 
         if is_dev():
             global CORE_URL
@@ -946,8 +1031,9 @@ def delete_device():
         headers = {'Accept': 'application/json', 'uid': config_data['uid'], 'password': config_data['password']}
         response = requests.get(url, headers=headers)
         response.raise_for_status()
+        print('This server has been deleted from the database successfully')
     except (ConnectTimeout, HTTPError, ReadTimeout, Timeout, ConnectionError, TooManyRedirects):
-        sys.exit('Cannot delete this device from the database.')
+        print('Cannot delete this server from the database.')
 
 
 def prompt(string):
@@ -1347,12 +1433,6 @@ def stop():
             print('Xitogent stopped successfully.')
 
 
-def reset_variables():
-    localStorage.setItem('uptime', 0)
-    localStorage.setItem('sent_sequences', 0)
-    localStorage.setItem('failed_sequences', 0)
-
-
 def is_restart_mode():
     if len(sys.argv) > 1 and sys.argv[1] == 'restart':
         return True
@@ -1372,10 +1452,10 @@ def is_status_mode():
 
 def show_xitogent_status():
 
-    uptime = localStorage.getItem('uptime')
+    uptime = get_item('uptime')
 
     if is_running() and uptime:
-        uptime = time.strftime("%H:%M:%S", time.gmtime(int(time.time()) - int(uptime)))
+        uptime = "{:0>8}".format(str(datetime.timedelta(seconds=int(time.time()) - int(uptime))))
     else:
         uptime = 0
 
@@ -1386,12 +1466,12 @@ def show_xitogent_status():
     else:
         status = 'stopped'
 
-    sent_sequences = localStorage.getItem('sent_sequences')
+    sent_sequences = get_item('sent_sequences')
 
     if not is_running() or not sent_sequences:
         sent_sequences = 0
 
-    failed_sequences = localStorage.getItem('failed_sequences')
+    failed_sequences = get_item('failed_sequences')
 
     if not is_running() or not failed_sequences:
         failed_sequences = 0
@@ -1503,7 +1583,8 @@ class Linux:
     def get_cpu_model_name():
         try:
             with open('/proc/cpuinfo') as f:
-                for line in f:
+      debug2: channel 0: window 998342 sent adjust 50234
+          for line in f:
                     if line.strip() and line.rstrip('\n').startswith('model name'):
                         return line.rstrip('\n').split(':')[1]
         except Exception as e:
@@ -2624,7 +2705,7 @@ class Linux:
             for route in data:
 
                 iface = route['iface'] if 'iface' in route else ''
-                
+
                 if iface.startswith('veth') or iface.startswith('br') or iface == 'lo':
                     continue
 
@@ -2662,10 +2743,10 @@ class Linux:
             for interface in data:
 
                 iface = interface['iface'] if 'iface' in interface else ''
-                
+
                 if iface.startswith('veth') or iface.startswith('br') or iface == 'lo':
                     continue
-                
+
                 interfaces.append({
                     'iface': iface,
                     'mtu': interface['mtu'] if 'mtu' in interface else '',
