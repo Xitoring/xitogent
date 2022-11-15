@@ -1,3 +1,6 @@
+> :warning: Xitogent v1 is not supported anymore, please login to your Xitoring dashboard and install Xitogent v2.
+>  more information can be found [on documents](https://xitoring.com/docs/getting-started/installation/)
+
 # What is Xitoring
 
 > Innovations that makes your daily routine easier
